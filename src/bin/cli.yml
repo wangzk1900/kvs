@@ -1,0 +1,28 @@
+name: kvs
+version: "0.1.0"
+author: wangzk1900 <wangzk1900@gmail.com>
+about: key-value store client
+subcommands:
+  - set:
+      about: Set the value of a string key to a string
+      args:
+        - KEY:
+            help: a string key
+            required: true
+            index: 1
+        - VALUE:
+            help: a string value
+            required: true
+            index: 2
+  - get:
+      about: Get the string value of the a string key
+      args:
+        - KEY:
+            help: a string key
+            required: true
+  - rm:
+      about: Remove a given key
+      args:
+        - KEY:
+            help: a string key
+            required: true
