@@ -1,10 +1,12 @@
-extern crate structopt;
+// extern crate structopt;
 
-use std::process::exit;
-
+use serde::{Deserialize, Serialize};
+use std::{env::current_dir, process::exit};
 use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+use kvs::{KvStore, KvsError, Result};
+
+#[derive(Debug, StructOpt, Serialize, Deserialize)]
 #[structopt(name = "kvs", about = "key-value store client")]
 enum Opt {
     /// Set the value of a string key to a string
@@ -26,24 +28,31 @@ enum Opt {
     },
 }
 
-fn main() {
+fn main() -> Result<()> {
     let opt = Opt::from_args();
 
+    let mut kvstore = KvStore::open(current_dir()?)?;
+
     match opt {
-        Opt::Set {
-            key: _key,
-            value: _value,
-        } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Opt::Set { key, value } => {
+            kvstore.set(key, value)?;
+            exit(0);
         }
-        Opt::Get { key: _key } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Opt::Get { key } => {
+            let value = kvstore.get(key)?.unwrap_or("Key not found".to_string());
+            println!("{}", value);
+            exit(0);
         }
-        Opt::Rm { key: _key } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Opt::Rm { key } => {
+            match kvstore.remove(key.to_string()) {
+                Ok(()) => {}
+                Err(KvsError::KeyNotFoundError) => {
+                    println!("Key not found");
+                    exit(1);
+                }
+                Err(e) => return Err(e),
+            }
+            exit(0);
         }
     }
 }
