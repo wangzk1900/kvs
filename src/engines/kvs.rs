@@ -15,6 +15,8 @@ use serde_json;
 
 use crate::error::{KvsError, Result};
 
+use super::KvsEngine;
+
 const COMPACTION_THRESHOLD: u64 = 1024 * 1024;
 
 /// The `KvStore` stores key/values in log.
@@ -22,7 +24,7 @@ const COMPACTION_THRESHOLD: u64 = 1024 * 1024;
 /// Example:
 ///
 /// ```rust
-/// # use kvs::KvStore;
+/// # use kvs::{KvStore, KvsEngine};
 /// # use tempfile::TempDir;
 /// let temp_dir = TempDir::new().expect("unable to create temporary working directory");
 /// let mut store = KvStore::open(temp_dir.path()).unwrap();
@@ -41,88 +43,6 @@ pub struct KvStore {
 }
 
 impl KvStore {
-    /// Set the value of a string key to a string.
-    ///
-    /// If the key exists, the value is updated.
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let command = Command::set(key.to_owned(), value.to_owned());
-
-        // Append the serialized command to the active log file
-        serde_json::to_writer(&mut self.writer, &command)?;
-        self.writer.flush()?;
-
-        let mut active_log = self.current_fid.to_string();
-        active_log.push_str(".log");
-        let new_offset = fs::metadata(self.path.join(active_log))?.len();
-
-        // Store command position in the index
-        let new_len = new_offset - self.current_pointer;
-        let command_pos = self.index.insert(
-            key.to_owned(),
-            CommandPos::new(self.current_fid, self.current_pointer, new_len),
-        );
-
-        if let Some(CommandPos { len, .. }) = command_pos {
-            self.compaction_size += len;
-        }
-
-        if self.compaction_size > COMPACTION_THRESHOLD {
-            self.compact()?;
-        }
-
-        self.current_pointer = new_offset;
-
-        // If the current_pointer reaches the 1M then create a new log file.
-        if self.current_pointer > 1024 * 1024 {
-            self.current_fid += 1;
-
-            let new_log_file = new_log_file(self.current_fid, self.path.to_owned())?;
-            self.writer = BufWriter::new(new_log_file);
-
-            self.readers.insert(
-                self.current_fid,
-                BufReader::new(File::open(get_log_path(
-                    self.current_fid,
-                    self.path.to_owned(),
-                ))?),
-            );
-
-            self.current_pointer = 0;
-        }
-
-        Ok(())
-    }
-
-    /// Get the string value of the a string key.
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        if let Some(CommandPos { fid, pos, len }) = self.index.get(&key) {
-            let reader = self.readers.get(&fid).unwrap();
-            reader.get_ref().seek(SeekFrom::Start(*pos))?;
-            let cmd_reader = reader.get_ref().take(*len);
-            let command: Command = serde_json::from_reader(cmd_reader)?;
-            if let Command::Set { value, .. } = command {
-                return Ok(Some(value));
-            }
-            return Ok(None);
-        }
-        Ok(None)
-    }
-
-    /// Remove a given key.
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        if let Some(CommandPos { len, .. }) = self.index.remove(&key) {
-            let rm_command = Command::remove(key.to_owned());
-            serde_json::to_writer(self.writer.get_ref(), &rm_command)?;
-            self.index.remove(&key);
-
-            self.compaction_size += len;
-
-            return Ok(());
-        }
-
-        Err(KvsError::KeyNotFoundError)
-    }
-
     /// Open the KvStore at a given path.
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let path = path.into();
@@ -238,6 +158,94 @@ impl KvStore {
         )?;
 
         Ok(())
+    }
+}
+
+impl KvsEngine for KvStore {
+    /// Sets the value of a string key to a string.
+    ///
+    /// If the key already exists, the previous value will be overwritten.
+    fn set(&mut self, key: String, value: String) -> Result<()> {
+        let command = Command::set(key.to_owned(), value.to_owned());
+
+        // Append the serialized command to the active log file
+        serde_json::to_writer(&mut self.writer, &command)?;
+        self.writer.flush()?;
+
+        let mut active_log = self.current_fid.to_string();
+        active_log.push_str(".log");
+        let new_offset = fs::metadata(self.path.join(active_log))?.len();
+
+        // Store command position in the index
+        let new_len = new_offset - self.current_pointer;
+        let command_pos = self.index.insert(
+            key.to_owned(),
+            CommandPos::new(self.current_fid, self.current_pointer, new_len),
+        );
+
+        if let Some(CommandPos { len, .. }) = command_pos {
+            self.compaction_size += len;
+        }
+
+        if self.compaction_size > COMPACTION_THRESHOLD {
+            self.compact()?;
+        }
+
+        self.current_pointer = new_offset;
+
+        // If the current_pointer reaches the 1M then create a new log file.
+        if self.current_pointer > 1024 * 1024 {
+            self.current_fid += 1;
+
+            let new_log_file = new_log_file(self.current_fid, self.path.to_owned())?;
+            self.writer = BufWriter::new(new_log_file);
+
+            self.readers.insert(
+                self.current_fid,
+                BufReader::new(File::open(get_log_path(
+                    self.current_fid,
+                    self.path.to_owned(),
+                ))?),
+            );
+
+            self.current_pointer = 0;
+        }
+
+        Ok(())
+    }
+
+    /// Gets the string value of a given string key.
+    ///
+    /// Returns `None` if the given key does not exist.
+    fn get(&mut self, key: String) -> Result<Option<String>> {
+        if let Some(CommandPos { fid, pos, len }) = self.index.get(&key) {
+            let reader = self.readers.get(&fid).unwrap();
+            reader.get_ref().seek(SeekFrom::Start(*pos))?;
+            let cmd_reader = reader.get_ref().take(*len);
+            let command: Command = serde_json::from_reader(cmd_reader)?;
+            if let Command::Set { value, .. } = command {
+                return Ok(Some(value));
+            }
+            return Ok(None);
+        }
+        Ok(None)
+    }
+
+    /// Removes a given key.
+    ///
+    /// Returns `KvsError::KeyNotFoundError` if the given key is not found.
+    fn remove(&mut self, key: String) -> Result<()> {
+        if let Some(CommandPos { len, .. }) = self.index.remove(&key) {
+            let rm_command = Command::remove(key.to_owned());
+            serde_json::to_writer(self.writer.get_ref(), &rm_command)?;
+            self.index.remove(&key);
+
+            self.compaction_size += len;
+
+            return Ok(());
+        }
+
+        Err(KvsError::KeyNotFoundError)
     }
 }
 

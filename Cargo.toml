@@ -8,15 +8,24 @@ version = "0.1.1"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-failure = "0.1.8"
+clap = "2.33.0"
+env_logger = "0.6.1"
+failure = "0.1.5"
 failure_derive = "0.1.8"
-serde = {version = "1.0.120", features = ["derive"]}
-serde_json = "1.0.61"
+log = "0.4.6"
+serde = {version = "1.0.89", features = ["derive"]}
+serde_json = "1.0.39"
+sled = "0.22.1"
 structopt = "0.3"
-tempfile = "3.0.7"
 
 [dev-dependencies]
-assert_cmd = "0.11.0"
+assert_cmd = "0.11"
+criterion = "0.3.4"
 predicates = "1.0.0"
+rand = "0.8.3"
 tempfile = "3.0.7"
 walkdir = "2.2.7"
+
+[[bench]]
+harness = false
+name = "engine_bench"

@@ -7,8 +7,18 @@
 #[macro_use]
 extern crate failure_derive;
 
-pub mod error;
-mod kv;
+#[macro_use]
+extern crate log;
 
+mod client;
+mod common;
+mod engines;
+pub mod error;
+mod server;
+
+pub use client::KvsClient;
+pub use engines::KvStore;
+pub use engines::KvsEngine;
+pub use engines::SledKvsEngine;
 pub use error::{KvsError, Result};
-pub use kv::KvStore;
+pub use server::KvsServer;
